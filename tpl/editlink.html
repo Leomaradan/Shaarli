@@ -21,6 +21,7 @@
             <input type="checkbox"  name="lf_private" id="lf_private">
             &nbsp;<label for="lf_private"><i>Private</i></label><br>
             {/if}
+            <input type="hidden" name="lf_pingback" id="lf_pingback" value="{$pingback}">
 	        <input type="submit" value="Save" name="save_edit" class="bigbutton" style="margin-left:40px;">
 	        <input type="submit" value="Cancel" name="cancel_edit" class="bigbutton" style="margin-left:40px;">
 	        {if condition="!$link_is_new"}<input type="submit" value="Delete" name="delete_link" class="bigbutton" style="margin-left:180px;" onClick="return confirmDeleteLink();">{/if}

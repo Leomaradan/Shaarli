@@ -1468,6 +1468,12 @@ function renderPage()
         $LINKSDB->savedb(); // save to disk
         pubsubhub();
 
+        if($_POST['lf_pingback'] != '') {
+            $source = htmlspecialchars(indexUrl()).'?'.smallHash($link['linkdate']);
+            ping($_POST['lf_pingback'], $source , $url);
+        }
+
+
         // If we are called from the bookmarklet, we must close the popup:
         if (isset($_GET['source']) && $_GET['source']=='bookmarklet') { echo '<script language="JavaScript">self.close();</script>'; exit; }
         $returnurl = ( isset($_POST['returnurl']) ? $_POST['returnurl'] : '?' );
@@ -1531,6 +1537,8 @@ function renderPage()
         $i=strpos($url,'?utm_source='); if ($i!==false) $url=substr($url,0,$i);
         $i=strpos($url,'#xtor=RSS-'); if ($i!==false) $url=substr($url,0,$i);
 
+        $pingback = '';
+        
         $link_is_new = false;
         $link = $LINKSDB->getLinkFromUrl($url); // Check if URL is not already in database (in this case, we will edit the existing link)
         if (!$link)
@@ -1541,12 +1549,14 @@ function renderPage()
             $description=''; $tags=''; $private=0;
             if (($url!='') && parse_url($url,PHP_URL_SCHEME)=='') $url = 'http://'.$url;
             // If this is an HTTP link, we try go get the page to extact the title (otherwise we will to straight to the edit form.)
-            if (empty($title) && parse_url($url,PHP_URL_SCHEME)=='http')
+            if (parse_url($url,PHP_URL_SCHEME)=='http')
             {
                 list($status,$headers,$data) = getHTTP($url,4); // Short timeout to keep the application responsive.
                 // FIXME: Decode charset according to specified in either 1) HTTP response headers or 2) <head> in html
-                if (strpos($status,'200 OK')!==false) $title=html_entity_decode(html_extract_title($data),ENT_QUOTES,'UTF-8');
+                if (strpos($status,'200 OK')!==false && empty($title)) $title=html_entity_decode(html_extract_title($data),ENT_QUOTES,'UTF-8');
 
+                preg_match('!<link rel=\"pingback\" href=\"(.+?)\"!',$data,$matches);
+                if (!empty($matches[1])) $pingback=$matches[1];
             }
             if ($url=='') $url='?'.smallHash($linkdate); // In case of empty URL, this is just a text (with a link that point to itself)
             $link = array('linkdate'=>$linkdate,'title'=>$title,'url'=>$url,'description'=>$description,'tags'=>$tags,'private'=>0);
@@ -1555,6 +1565,7 @@ function renderPage()
         $PAGE = new pageBuilder;
         $PAGE->assign('linkcount',count($LINKSDB));
         $PAGE->assign('link',$link);
+        $PAGE->assign('pingback',$pingback);
         $PAGE->assign('link_is_new',$link_is_new);
         $PAGE->assign('token',getToken()); // XSRF protection.
         $PAGE->assign('http_referer',(isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : ''));
@@ -2409,6 +2420,53 @@ function invalidateCaches()
 {
     unset($_SESSION['tags']);  // Purge cache attached to session.
     pageCache::purgeCache();   // Purge page cache shared by sessions.
+}
+
+// Pingback functions
+// http://allanwirth.com/php/pingback.html
+
+
+function http_req($uri, $method = "GET", $add_header = '', $payload =  '') {
+    preg_match("/^http:\/\/([^\/]+)(.*)$/", $uri, $matches);
+    $hostname = $matches[1];
+    $script = $matches[2];
+    if(empty($hostname)) {
+        return;
+    }
+    $fp = fsockopen($hostname, 80, $errno, $errstr, 30);
+    if(!$fp) {
+        return;
+    }
+    fwrite($fp, "$method $script HTTP/1.1
+Host: $hostname
+User-Agent: pingback
+$add_header
+
+$payload
+");
+    stream_set_timeout($fp, 5);
+    $res = stream_get_contents($fp);
+    fclose($fp);
+    return $res;
+}
+function ping($pingbackserver, $sourceURI, $targetURI) {
+    $payload = <<<ENDE
+    <?xml version="1.0"?>
+    <methodCall>
+        <methodName>pingback.ping</methodName>
+        <params>
+        <param>
+        <value>$sourceURI</value>
+        </param>
+        <param>
+        <value>$targetURI</value>
+        </param>
+        </params>
+    </methodCall>
+ENDE;
+    $length = strlen($payload);
+    $request_head = "Content-Type: text/xml\r\nContent-length: $length";
+    return http_req($pingbackserver, "POST", $request_head, $payload);
 }
 
 if (isset($_SERVER["QUERY_STRING"]) && startswith($_SERVER["QUERY_STRING"],'do=genthumbnail')) { genThumbnail(); exit; }  // Thumbnail generation/cache does not need the link database.
